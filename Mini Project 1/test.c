@@ -124,19 +124,19 @@ int main(int argc, char *argv[]) {
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = 0;
 
-    // check for proper usage
+    // proper usage
     if (argc != 2) {
         printf("Usage: \"%s <FIFO file name>\"\n", argv[0]);
         return 1;
     }
     
-    // create FIFO file for game master to read from
+    // make fifo file
     if (mkfifo(fifo_name, 0666) == -1) {
         perror("mkfifo() in main()");
         return 1;
     }
 
-    // open FIFO file for reading
+    // open fifo file for game master
     fd_r = open(fifo_name, O_RDONLY);
 
     if (fd_r == -1) {
@@ -145,7 +145,6 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // open FIFO file for writing
     fd_w = open(fifo_name, O_WRONLY);
 
     if (fd_w == -1) {
@@ -155,7 +154,6 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // Check for sigaction() event
     if (sigaction(SIGINT, &sa, NULL) == -1) {
         perror("sigaction() in main()");
         close(fd_r);
@@ -164,13 +162,12 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // seed random number generator
     srand(time(NULL));
     puts("welcome to the \"Shop Wisely!\" Host Program!");
     
     while(1) {
         // start of loop when previous contestant is kicked
-        // reposition fd_r to beginning of file
+        // get ID of contestant
         if (lseek(fd_r, 0, SEEK_SET) == -1) {
             perror("lseek() in main()");
             close(fd_r);
@@ -178,7 +175,6 @@ int main(int argc, char *argv[]) {
             unlink(fifo_name);
             return 1;
         }
-        // get ID of contestant
         if (read(fd_r, buf, BUF_MAX) == -1) {
             perror("read() in main()");
             close(fd_r);
@@ -191,11 +187,9 @@ int main(int argc, char *argv[]) {
         // store ID
         store_ID(contestant_id);
         printf("Contestant with ID: %d has joined!\n", contestant_id);
-
         // start of loop when contestant is still in the game
         next_question:
         printf("Generating Question %d\n", question_count++);
-        
         // generate question
         question = generate_question();
         printf("%d numbers! for %d seconds!\n", question.num_operands, question.timeout);
@@ -203,7 +197,6 @@ int main(int argc, char *argv[]) {
             printf("%d\n", question.number[i]);
         }
         puts("Sending...");
-        
         // prepare question in buffer
         write_question(question, buf);
         // send question to contestant
