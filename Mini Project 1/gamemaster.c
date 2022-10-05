@@ -52,7 +52,8 @@ void handler(int signo) {
         write(STDERR_FILENO, "Error opening \"scores.txt\"\n", 27);
         _exit(EXIT_FAILURE);
     }
-    
+    // write scores to file
+    write(fd, scores, strlen(scores));
     write(STDOUT_FILENO, "Goodbye! All results are in scores.txt\n", 39);
     unlink(fifo_name);
     _exit(EXIT_SUCCESS);
@@ -254,20 +255,22 @@ int main(int argc, char *argv[]) {
         } else {
             // When no data is read from the pipe
             puts("TIMED OUT!");
-            // terminate contestant
-            if (kill(process_list[current_index-1].id, SIGUSR1) == -1) {
-                perror("kill() in main()");
-                close(fd_r);
-                close(fd_w);
-                unlink(fifo_name);
-                return 1;
-            }
         }
         printf("The answer is %d\n", question.answer);
         printf("Terminating contestant %d\n", process_list[current_index-1].id);
+        // kill contestant process
+        if (kill(process_list[current_index-1].id, SIGUSR1) == -1) {
+            perror("kill() in main()");
+            close(fd_r);
+            close(fd_w);
+            unlink(fifo_name);
+            return 1;
+        }
         // save score
         snprintf(buf, BUF_MAX, "%d -> %d\n", process_list[current_index-1].id, process_list[current_index-1].score);
         strncat(scores, buf, BUF_MAX - strlen(scores) - 1);
+        // wait for connection from next contestant
+        puts("Waiting for connection...");
     }
     return 0;
 }
