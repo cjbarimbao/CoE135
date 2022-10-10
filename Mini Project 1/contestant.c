@@ -58,10 +58,10 @@ void parse_question(question_t* question, char* buf) {
     token = strtok(NULL, "/");
     question->timeout = (uint)strtol(token, NULL, 10);
     // extract other tokens (Operand1/.../Operand5)
+    token = strtok(NULL, "/");
     while (token != NULL) {
+        strncpy(token_buffer[i++], token, MAX_STR_WIDTH);
         token = strtok(NULL, "/");
-        strncpy(token_buffer[i], token, MAX_STR_WIDTH);
-        i++;
     }
     // convert operands to integers and store to question struct
     for (i = 0; i < question->num_operands; i++) {
