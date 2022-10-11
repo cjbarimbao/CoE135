@@ -26,6 +26,7 @@ typedef struct question_s {
     unsigned int num_operands;
     unsigned int number[5];
     unsigned int timeout;
+    unsigned int answer;
 } question_t;
 
 /*------------------
@@ -57,6 +58,9 @@ void parse_question(question_t* question, char* buf) {
     // get timeout value
     token = strtok(NULL, "/");
     question->timeout = (uint)strtol(token, NULL, 10);
+    // get question answer
+    token = strtok(NULL, "/");
+    question->answer = (uint)strtol(token, NULL, 10);
     // extract other tokens (Operand1/.../Operand5)
     token = strtok(NULL, "/");
     while (token != NULL) {
@@ -69,6 +73,12 @@ void parse_question(question_t* question, char* buf) {
     }
 }
 
+int check_answer(char *buf, unsigned int answer) {
+    unsigned int user_answer;
+    
+    user_answer = (unsigned int)strtol(buf, NULL, 10);
+    return (user_answer == answer);
+}
 
 /*------------------ 
  * Main function
@@ -84,6 +94,7 @@ int main(int argc, char*argv[])
     question_t question;
     pid_t contestant_id;
     int answer;
+    sigset_t set;
     
     fifo_name = argv[1];
     sa.sa_handler = handler;
@@ -171,7 +182,13 @@ int main(int argc, char*argv[])
                 }
                 // parse question
                 parse_question(&question, buf);
+                // print question
+                printf("For %d seconds\n", question.timeout);
+                for (i = 0; i < question.num_operands; i++) {
+                    printf("%d\n", question.number[i]);
+                }
                 // ask user input for answer
+                puts("Your answer: ");
                 fgets(buf, BUF_MAX, stdin);
                 // write answer to FIFO file
                 if (lseek(fd_w, 0, SEEK_SET) == -1) {
@@ -185,8 +202,30 @@ int main(int argc, char*argv[])
                     close(fd_r);
                     close(fd_w);
                     return 1;
-                } 
-                // wait for response from game master
+                }
+                // check answer
+                if (check_answer(buf, question.answer)) {
+                    puts("CORRECT!");
+                } else {
+                    puts("WRONG!\nTerminating...");
+                    // wait for SIGUSR1
+                    // add SIGUSR1 to signal mask
+                    sigemptyset(&set);
+                    if (sigaddset(&set, SIGUSR1) == -1) {
+                        perror("sigaddset() in main()");
+                        close(fd_r);
+                        close(fd_w);
+                        return 1;
+                    }
+                    if (sigwait(&set, NULL) == -1) {
+                        perror("sigwait() in main()");
+                        close(fd_r);
+                        close(fd_w);
+                        return 1;
+                    }
+                    // terminate
+                    exit(0);
+                }
             }
         }
         // parent process
