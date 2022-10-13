@@ -47,6 +47,11 @@ void handler(int signo) {
     exit_flag = true;
 }
 
+// SIGUSR1 handler
+void terminate_contestant(int signo) {
+    exit(EXIT_SUCCESS);
+}
+
 void parse_question(question_t* question, char* buf) {
     // parse question
     int i = 0;
@@ -88,18 +93,16 @@ int main(int argc, char*argv[])
 {
     int fd_r, fd_w;
     int i;
+    int wstatus = 0;
     int question_count = 1;
     char buf[BUF_MAX];
-    struct sigaction sa;
+    struct sigaction sa, sigusr_1;
     question_t question;
     pid_t contestant_id;
     int answer;
     sigset_t set;
     
     fifo_name = argv[1];
-    sa.sa_handler = handler;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = 0;
 
     // check for proper usage
     if (argc != 2) {
@@ -123,14 +126,6 @@ int main(int argc, char*argv[])
         return 1;
     }
 
-    // check for SIGINT
-    if (sigaction(SIGINT, &sa, NULL) == -1) {
-        perror("sigaction() in main()");
-        close(fd_r);
-        close(fd_w);
-        return 1;
-    }
-
     while (1) {
         // fork a child process
         contestant_id = fork();
@@ -144,6 +139,32 @@ int main(int argc, char*argv[])
         } 
         // child process
         else if (contestant_id == 0) {
+
+            // setup sigaction for SIGINT
+            sa.sa_handler = handler;
+            sigemptyset(&sa.sa_mask);
+            sa.sa_flags = 0;
+            // setup sigaction for SIGUSR1
+            sigusr_1.sa_handler = terminate_contestant;
+            sigemptyset(&sigusr_1.sa_mask);
+            sigusr_1.sa_flags = 0;
+
+            // check for SIGINT
+            if (sigaction(SIGINT, &sa, NULL) == -1) {
+                perror("sigaction() in main()");
+                close(fd_r);
+                close(fd_w);
+                return 1;
+            }
+
+            // check for SIGUSR1
+            if (sigaction(SIGUSR1, &sigusr_1, NULL) == -1) {
+                perror("sigaction() in main()");
+                close(fd_r);
+                close(fd_w);
+                return 1;
+            }
+
             // print welcome message
             puts("Welcome to Shop Wisely!");
             // print contestant ID
@@ -163,7 +184,7 @@ int main(int argc, char*argv[])
                 return 1;
             } 
             // contestant loop
-            while (exit_flag == false) {
+            while (true) {
                 // print question number
                 printf("Question %d\n", question_count++);
                 // read from FIFO file
@@ -190,6 +211,21 @@ int main(int argc, char*argv[])
                 // ask user input for answer
                 puts("Your answer: ");
                 fgets(buf, BUF_MAX, stdin);
+                buf[strcspn(buf, "\r\n")] = 0;
+                if (exit_flag == true) {
+                    printf("Are you sure you want to quit? (y/n) ");
+                    fgets(buf, BUF_MAX, stdin);
+                    buf[strcspn(buf, "\r\n")] = 0;
+                    if (!strcmp(buf, "y")) {
+                        // terminate
+                        _exit(3);
+                    } else {
+                        // continue
+                        exit_flag = false;
+                        fgets(buf, BUF_MAX, stdin);
+                        buf[strcspn(buf, "\r\n")] = 0;
+                    }
+                }
                 // write answer to FIFO file
                 if (lseek(fd_w, 0, SEEK_SET) == -1) {
                     perror("lseek() in main()");
@@ -224,14 +260,33 @@ int main(int argc, char*argv[])
                         return 1;
                     }
                     // terminate
-                    exit(0);
+                    exit(EXIT_SUCCESS);
                 }
             }
         }
         // parent process
         else {
+            // print parent ID
+            printf("Parent ID: %d\n", (int)getpid());
+            // setup sigaction for parent SIGINT
+            sa.sa_handler = SIG_IGN;
+            sigemptyset(&sa.sa_mask);
+            sa.sa_flags = 0;
+            // check for SIGINT
+            if (sigaction(SIGINT, &sa, NULL) == -1) {
+                perror("sigaction() in main()");
+                close(fd_r);
+                close(fd_w);
+                return 1;
+            }
             // wait for child process to terminate
-            wait(NULL);
+            wait(&wstatus);
+            if (WIFEXITED(wstatus)) {
+                if (WEXITSTATUS(wstatus) == 3) {
+                    puts("TERMINATED.");
+                    exit(EXIT_SUCCESS);
+                } 
+            }
         }
     }
 }

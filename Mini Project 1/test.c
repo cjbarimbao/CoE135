@@ -1,3 +1,5 @@
+// Signal handler test
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/time.h>
@@ -22,44 +24,25 @@
  * Type definitions
 ------------------ */
 
-typedef struct question_s {
-    unsigned int num_operands;
-    unsigned int number[5];
-    unsigned int timeout;
-} question_t;
-
 /*------------------
  * Global variables
 ------------------ */
+
+static volatile bool exit_flag = false;
+unsigned int score = 0;
 
 /* ---------------------
  * Function definitions
 --------------------- */
 
-void parse_question(question_t* question, char* buf) {
-    // parse question
-    int i = 0; 
-    char* token;
-    char token_buffer[7][MAX_STR_WIDTH];
-    // get number of operands
-    token = strtok(buf, "/");
-    puts(token);
-    question->num_operands = (uint)strtol(token, NULL, 10);
-    // get timeout value
-    token = strtok(NULL, "/");
-    puts(token);
-    question->timeout = (uint)strtol(token, NULL, 10);
-    // extract other tokens (Operand1/.../Operand5)
-    token = strtok(NULL, "/");
-    while (token != NULL) {
-        puts(token);
-        strncpy(token_buffer[i++], token, MAX_STR_WIDTH);
-        token = strtok(NULL, "/");
-    }
-    // convert operands to integers and store to question struct
-    for (i = 0; i < question->num_operands; i++) {
-            question->number[i] = (uint)strtol(token_buffer[i], NULL, 10);
-    }
+// SIGINT handler for child
+void sigint(int signo) {
+    exit_flag = true;
+}
+
+// SIGUSR1 handler
+void terminate_contestant(int signo) {
+    exit(EXIT_SUCCESS);
 }
 
 
@@ -69,18 +52,106 @@ void parse_question(question_t* question, char* buf) {
 
 int main(void) 
 {
-    int i;
-    int question_count = 1;
-    char buf[BUF_MAX] = "3/10/6971/567/12";
-    question_t question;
-   // print question number
-   printf("Question %d\n", question_count++);
-   // parse question
-   parse_question(&question, buf);
-   printf("Number of operands: %d\nTimeout: %d\n", question.num_operands, question.timeout);
-    for (i = 0; i < question.num_operands; i++) {
-         printf("Operand %d: %d\n", i+1, question.number[i]);
+    char buf[BUF_MAX];
+    int wstatus = 0;
+    struct sigaction sa, sigusr_1;
+    pid_t contestant_id;
+    sigset_t set;
+
+    while (1) {
+        // fork a child process
+        contestant_id = fork();
+
+        // check for fork error
+        if (contestant_id == -1) {
+            perror("fork() in main()");
+            return 1;
+        } 
+        // child process
+        else if (contestant_id == 0) {
+
+            // setup sigaction for child SIGINT
+            sa.sa_handler = sigint;
+            sigemptyset(&sa.sa_mask);
+            sa.sa_flags = 0;
+            // setup sigaction for SIGUSR1
+            sigusr_1.sa_handler = terminate_contestant;
+            sigemptyset(&sigusr_1.sa_mask);
+            sigusr_1.sa_flags = 0;
+
+            // check for SIGINT
+            if (sigaction(SIGINT, &sa, NULL) == -1) {
+                perror("sigaction() in main()");
+                return 1;
+            }
+
+            // check for SIGUSR1
+            if (sigaction(SIGUSR1, &sigusr_1, NULL) == -1) {
+                perror("sigaction() in main()");
+                return 1;
+            }
+            // print welcome message
+            puts("Welcome to Shop Wisely!");
+            // print contestant ID
+            printf("Your ID is %d\n", (int)getpid());
+            // send PID to gamemaster
+            while (true) {
+                fgets(buf, BUF_MAX, stdin);
+                buf[strcspn(buf, "\r\n")] = 0;
+                if (exit_flag == true) {
+                    printf("Are you sure you want to quit? (y/n) ");
+                    fgets(buf, BUF_MAX, stdin);
+                    buf[strcspn(buf, "\r\n")] = 0;
+                    if (!strcmp(buf, "y")) {
+                        // terminate
+                        _exit(3);
+                    } else {
+                        // continue
+                        exit_flag = false;
+                        fgets(buf, BUF_MAX, stdin);
+                        buf[strcspn(buf, "\r\n")] = 0;
+                    }
+                } 
+                if (!strcmp(buf, "y")) {
+                    puts("Correct!");
+                } else {
+                    puts("Wrong!\nTerminating...");
+                    sigemptyset(&set);
+                    if (sigaddset(&set, SIGUSR1) == -1) {
+                        perror("sigaddset() in main()");
+                        return 1;
+                    }
+                    if (sigwait(&set, NULL) == -1) {
+                        perror("sigwait() in main()");
+                        return 1;
+                    }    
+                    // terminate
+                    exit(EXIT_SUCCESS);
+                }   
+            } 
+        }
+        // parent process
+        else {
+            // print parent ID
+            printf("Parent ID: %d\n", (int)getpid());
+            // setup sigaction for parent SIGINT
+            sa.sa_handler = SIG_IGN;
+            sigemptyset(&sa.sa_mask);
+            sa.sa_flags = 0;
+            // check for SIGINT
+            if (sigaction(SIGINT, &sa, NULL) == -1) {
+                perror("sigaction() in main()");
+                return 1;
+            }
+            // wait for child process to terminate
+            wait(&wstatus);
+            if (WIFEXITED(wstatus)) {
+                if (WEXITSTATUS(wstatus) == 3) {
+                    puts("Contestant terminated.");
+                    exit(EXIT_SUCCESS);
+                } 
+            }
+        }
     }
-    
     return 0;
 }
