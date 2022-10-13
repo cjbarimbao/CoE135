@@ -99,7 +99,6 @@ int main(int argc, char*argv[])
     struct sigaction sa, sigusr_1;
     question_t question;
     pid_t contestant_id;
-    int answer;
     sigset_t set;
     
     fifo_name = argv[1];
