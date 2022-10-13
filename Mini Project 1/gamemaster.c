@@ -56,7 +56,7 @@ void handler(int signo) {
     write(fd, scores, strlen(scores));
     write(STDOUT_FILENO, "Goodbye! All results are in scores.txt\n", 39);
     unlink(fifo_name);
-    _exit(EXIT_SUCCESS);
+    exit(EXIT_SUCCESS);
 }
 
 void store_ID(int id) {
@@ -89,6 +89,7 @@ void write_question(question_t question, char *buf) {
     int i;
     char strings[MAX_STR_WIDTH];
 
+    // Format of question: "No. of operands/Timeout value/Answer/Operand1/Operand2/.../Operand5"
     snprintf(buf, BUF_MAX, "%d/%d/%d/", question.num_operands, question.timeout, question.answer);
     for (i = 0; i < question.num_operands; i++) {
         snprintf(strings, MAX_STR_WIDTH, "%d/", question.number[i]);
@@ -109,10 +110,11 @@ int check_answer(char *buf, unsigned int answer) {
  * main function
 ---------------- */
 
-int main(int argc, char *argv[]) {
+int main(int argc, char *argv[]) 
+{
     int fd_r, fd_w;
     int i;
-    int question_count = 1;
+    int question_count;
     char buf[BUF_MAX];
     struct timeval tv;
     struct sigaction sa;
@@ -169,7 +171,7 @@ int main(int argc, char *argv[]) {
     srand(time(NULL));
     puts("welcome to the \"Shop Wisely!\" Host Program!");
     
-    while(1) {
+    while (1) {
         // start of loop when previous contestant is kicked
         // reposition fd_r to beginning of file
         if (lseek(fd_r, 0, SEEK_SET) == -1) {
@@ -192,6 +194,8 @@ int main(int argc, char *argv[]) {
         // store ID
         store_ID(contestant_id);
         printf("Contestant with ID: %d has joined!\n", contestant_id);
+        // reset question count
+        question_count = 1;
 
         // start of loop when contestant is still in the game
         next_question:
