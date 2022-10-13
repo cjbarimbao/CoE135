@@ -10,6 +10,7 @@
 #include <string.h>
 #include <signal.h>
 #include <stdbool.h>
+#include <sys/wait.h>
 
 /*---------
  * Macros
