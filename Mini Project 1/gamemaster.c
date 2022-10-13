@@ -9,6 +9,7 @@
 #include <math.h>
 #include <string.h>
 #include <signal.h>
+#include <stdbool.h>
 /*---------
  * Macros
 --------- */
@@ -36,6 +37,7 @@ typedef struct process_s {
  * Global variables
 ------------------ */
 
+static volatile bool exit_flag = false;
 unsigned int current_index = 0;
 process_t process_list[100];
 char scores[BUF_MAX];
@@ -46,17 +48,7 @@ char *fifo_name;
 --------------------- */
 
 void handler(int signo) {
-    int fd = open("scores.txt", O_CREAT|O_RDWR, S_IRWXU);
-    
-    if (fd == -1) {
-        write(STDERR_FILENO, "Error opening \"scores.txt\"\n", 27);
-        _exit(EXIT_FAILURE);
-    }
-    // write scores to file
-    write(fd, scores, strlen(scores));
-    write(STDOUT_FILENO, "Goodbye! All results are in scores.txt\n", 39);
-    unlink(fifo_name);
-    exit(EXIT_SUCCESS);
+    exit_flag = true;
 }
 
 void store_ID(int id) {
@@ -121,6 +113,7 @@ int main(int argc, char *argv[])
     question_t question;
     pid_t contestant_id;
     fd_set readfds;
+    FILE *fp;
     
     fifo_name = argv[1];
     sa.sa_handler = handler;
@@ -188,6 +181,24 @@ int main(int argc, char *argv[])
             close(fd_w);
             unlink(fifo_name);
             return 1;
+        }
+        // check for exit flag from signal handler
+        if (exit_flag == true) {
+            // open scores file for writing
+            fp = fopen("scores.txt", "w");
+            if (fp == NULL) {
+                perror("fopen() in main()");
+                close(fd_r);
+                close(fd_w);
+                unlink(fifo_name);
+                return 1;
+            }
+            // write scores to file
+            fputs(scores, fp);
+            puts("Goodbye! All results are in scores.txt");
+            exit_flag = false;
+            fclose(fp);
+            _exit(EXIT_SUCCESS);
         }
         // convert to integer
         contestant_id = (int)strtol(buf, NULL, 10);
