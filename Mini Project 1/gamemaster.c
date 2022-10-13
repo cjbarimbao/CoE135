@@ -113,6 +113,7 @@ int main(int argc, char *argv[])
     question_t question;
     pid_t contestant_id;
     fd_set readfds;
+    FILE *fp;
     
     fifo_name = argv[1];
     sa.sa_handler = handler;
@@ -183,8 +184,20 @@ int main(int argc, char *argv[])
         }
         // check for exit flag from signal handler
         if (exit_flag == true) {
+            // open scores file for writing
+            fp = fopen("scores.txt", "w");
+            if (fp == NULL) {
+                perror("fopen() in main()");
+                close(fd_r);
+                close(fd_w);
+                unlink(fifo_name);
+                return 1;
+            }
+            // write scores to file
+            fputs(scores, fp);
             puts("Goodbye! All results are in scores.txt");
             exit_flag = false;
+            fclose(fp);
             _exit(EXIT_SUCCESS);
         }
         // convert to integer
