@@ -10,6 +10,7 @@
 #include <string.h>
 #include <signal.h>
 #include <stdbool.h>
+#include <errno.h>
 /*---------
  * Macros
 --------- */
@@ -131,9 +132,8 @@ int main(int argc, char *argv[])
         perror("mkfifo() in main()");
         return 1;
     }
-
     // open FIFO file for reading
-    fd_r = open(fifo_name, O_RDONLY);
+    fd_r = open(fifo_name, O_RDONLY|O_NONBLOCK);
 
     if (fd_r == -1) {
         perror("open() in main()");
@@ -142,7 +142,7 @@ int main(int argc, char *argv[])
     }
 
     // open FIFO file for writing
-    fd_w = open(fifo_name, O_WRONLY);
+    fd_w = open(fifo_name, O_WRONLY|O_NONBLOCK);
 
     if (fd_w == -1) {
         perror("open() in main()");
@@ -169,6 +169,7 @@ int main(int argc, char *argv[])
         // reposition fd_r to beginning of file
         if (lseek(fd_r, 0, SEEK_SET) == -1) {
             perror("lseek() in main()");
+            fprintf(stderr, "%d %s\n", errno, strerror(errno));
             close(fd_r);
             close(fd_w);
             unlink(fifo_name);

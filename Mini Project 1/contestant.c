@@ -110,7 +110,7 @@ int main(int argc, char*argv[])
     }
 
     // open FIFO file for reading
-    fd_r = open(fifo_name, O_RDONLY);
+    fd_r = open(fifo_name, O_RDONLY|O_NONBLOCK);
 
     if (fd_r == -1) {
         fprintf(stderr, "No such instance of \"Shop Wisely!\" exists, terminating...\n");
@@ -118,7 +118,7 @@ int main(int argc, char*argv[])
     }
 
     // open FIFO file for writing
-    fd_w = open(fifo_name, O_WRONLY);
+    fd_w = open(fifo_name, O_WRONLY|O_NONBLOCK);
 
     if (fd_w == -1) {
         perror("open() in main()");
