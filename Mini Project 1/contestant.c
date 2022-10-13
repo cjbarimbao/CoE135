@@ -34,7 +34,6 @@ typedef struct question_s {
 ------------------ */
 
 static volatile bool exit_flag = false;
-char scores[BUF_MAX];
 char *fifo_name;
 unsigned int score = 0;
 
@@ -217,6 +216,8 @@ int main(int argc, char*argv[])
                     fgets(buf, BUF_MAX, stdin);
                     buf[strcspn(buf, "\r\n")] = 0;
                     if (!strcmp(buf, "y")) {
+                        // print scores
+                        printf("Your score for this round is %d\n", score);
                         // terminate
                         _exit(3);
                     } else {
@@ -242,6 +243,8 @@ int main(int argc, char*argv[])
                 // check answer
                 if (check_answer(buf, question.answer)) {
                     puts("CORRECT!");
+                    // update score
+                    score++;
                 } else {
                     puts("WRONG!\nTerminating...");
                     // wait for SIGUSR1
@@ -259,6 +262,8 @@ int main(int argc, char*argv[])
                         close(fd_w);
                         return 1;
                     }
+                    // print scores
+                    printf("Your score for this round is %d\n", score);
                     // terminate
                     exit(EXIT_SUCCESS);
                 }
