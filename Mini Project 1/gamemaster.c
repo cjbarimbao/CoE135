@@ -11,6 +11,7 @@
 #include <signal.h>
 #include <stdbool.h>
 #include <errno.h>
+
 /*---------
  * Macros
 --------- */
@@ -99,21 +100,110 @@ int check_answer(char *buf, unsigned int answer) {
     return (user_answer == answer);
 }
 
+void read_data(char *buf, char *fifo_name) {
+    int fd_r;
+    // open FIFO file for reading
+    fd_r = open(fifo_name, O_RDONLY);
+
+    if (fd_r == -1) {
+        fprintf(stderr, "Error %d in read_data(): %s\n", errno, strerror(errno));
+        unlink(fifo_name);
+        _exit(EXIT_FAILURE);
+    }
+
+    // read data from FIFO file
+    if (read(fd_r, buf, BUF_MAX) == -1) {
+        fprintf(stderr, "Error %d in read_data(): %s\n", errno, strerror(errno));
+        close(fd_r);
+        unlink(fifo_name);
+        _exit(EXIT_FAILURE);
+    }
+
+    close(fd_r);
+}
+
+void write_data(char *buf, char *fifo_name) {
+    int fd_w;
+    // open FIFO file for writing
+    fd_w = open(fifo_name, O_WRONLY);
+
+    if (fd_w == -1) {
+        fprintf(stderr, "Error %d in write_data(): %s\n", errno, strerror(errno));
+        unlink(fifo_name);
+        _exit(EXIT_FAILURE);
+    }
+
+    // write data to FIFO file
+    if (write(fd_w, buf, strlen(buf) + 1) == -1) {
+        fprintf(stderr, "Error %d in write_data(): %s\n", errno, strerror(errno));
+        close(fd_w);
+        unlink(fifo_name);
+        _exit(EXIT_FAILURE);
+    }
+
+    close(fd_w);
+}
+
+int wait_answer(char *buf, char *fifo_name, question_t *question) {
+    // returns 0 if timeout, 1 if answer is received within time limit
+    int status;
+    int fd_r;
+    fd_set readfds;
+    struct timeval tv;
+
+    // open FIFO file for reading
+    fd_r = open(fifo_name, O_RDONLY);
+
+    if (fd_r == -1) {
+        fprintf(stderr, "Error %d in wait_answer(): %s\n", errno, strerror(errno));
+        unlink(fifo_name);
+        _exit(EXIT_FAILURE);
+    }
+
+    // set timeout value
+    tv.tv_sec = question->timeout;
+    tv.tv_usec = 0;
+
+    // set file descriptor
+    FD_ZERO(&readfds);
+    FD_SET(fd_r, &readfds);
+
+    // wait for data from FIFO file
+    status = select(fd_r + 1, &readfds, NULL, NULL, &tv);
+
+    if (status == -1) {
+        fprintf(stderr, "Error %d in wait_answer(): %s\n", errno, strerror(errno));
+        close(fd_r);
+        unlink(fifo_name);
+        _exit(EXIT_FAILURE);
+    } else if (status == 0) {
+        close(fd_r);
+        return 0;
+    } else {
+        // read data from FIFO file
+        if (read(fd_r, buf, BUF_MAX) == -1) {
+            fprintf(stderr, "Error %d in wait_answer(): %s\n", errno, strerror(errno));
+            close(fd_r);
+            unlink(fifo_name);
+            _exit(EXIT_FAILURE);
+        }
+        close(fd_r);
+        return 1;
+    }
+}
+
 /*----------------
  * main function
 ---------------- */
 
 int main(int argc, char *argv[]) 
 {
-    int fd_r, fd_w;
     int i;
     int question_count;
     char buf[BUF_MAX];
-    struct timeval tv;
     struct sigaction sa;
     question_t question;
     pid_t contestant_id;
-    fd_set readfds;
     FILE *fp;
     
     fifo_name = argv[1];
@@ -132,33 +222,7 @@ int main(int argc, char *argv[])
         perror("mkfifo() in main()");
         return 1;
     }
-    // open FIFO file for reading
-    fd_r = open(fifo_name, O_RDONLY|O_NONBLOCK);
-
-    if (fd_r == -1) {
-        perror("open() in main()");
-        unlink(fifo_name);
-        return 1;
-    }
-
-    // open FIFO file for writing
-    fd_w = open(fifo_name, O_WRONLY|O_NONBLOCK);
-
-    if (fd_w == -1) {
-        perror("open() in main()");
-        close(fd_r);
-        unlink(fifo_name);
-        return 1;
-    }
-
-    // Check for sigaction() event
-    if (sigaction(SIGINT, &sa, NULL) == -1) {
-        perror("sigaction() in main()");
-        close(fd_r);
-        close(fd_w);
-        unlink(fifo_name);
-        return 1;
-    }
+    
 
     // seed random number generator
     srand(time(NULL));
@@ -166,31 +230,14 @@ int main(int argc, char *argv[])
     
     while (1) {
         // start of loop when previous contestant is kicked
-        // reposition fd_r to beginning of file
-        if (lseek(fd_r, 0, SEEK_SET) == -1) {
-            perror("lseek() in main()");
-            fprintf(stderr, "%d %s\n", errno, strerror(errno));
-            close(fd_r);
-            close(fd_w);
-            unlink(fifo_name);
-            return 1;
-        }
         // get ID of contestant
-        if (read(fd_r, buf, BUF_MAX) == -1) {
-            perror("read() in main()");
-            close(fd_r);
-            close(fd_w);
-            unlink(fifo_name);
-            return 1;
-        }
+        read_data(buf, fifo_name);
         // check for exit flag from signal handler
         if (exit_flag == true) {
             // open scores file for writing
             fp = fopen("scores.txt", "w");
             if (fp == NULL) {
                 perror("fopen() in main()");
-                close(fd_r);
-                close(fd_w);
                 unlink(fifo_name);
                 return 1;
             }
@@ -224,42 +271,9 @@ int main(int argc, char *argv[])
         // prepare question in buffer
         write_question(question, buf);
         // send question to contestant
-        if (lseek(fd_w, 0, SEEK_SET) == -1) {
-            perror("lseek() in main()");
-            close(fd_r);
-            close(fd_w);
-            unlink(fifo_name);
-            return 1;
-        }
-        if (write(fd_w, buf, strlen(buf) + 1) == -1) {
-            perror("write () in main()");
-            close(fd_r);
-            close(fd_w);
-            unlink(fifo_name);
-            return 1;
-        } 
-        // wait for response    
-        tv.tv_sec = question.timeout;
-        tv.tv_usec = 0;
-        FD_ZERO(&readfds);
-        FD_SET(fd_r, &readfds);
-        select(fd_r+1, &readfds, NULL, NULL, &tv);
-
-        if (FD_ISSET(fd_r, &readfds)) {
-            if (lseek(fd_r, 0, SEEK_SET) == -1) {
-                perror("lseek() in main()");
-                close(fd_r);
-                close(fd_w);
-                unlink(fifo_name);
-                return 1;
-            }
-            if (read(fd_r, buf, BUF_MAX) == -1) {
-                perror("read() in main()");
-                close(fd_r);
-                close(fd_w);
-                unlink(fifo_name);
-                return 1;
-            }
+        write_data(buf, fifo_name);
+        // wait for response
+        if (wait_answer(buf, fifo_name, &question)) {
             if (check_answer(buf, question.answer)) {
                 puts("CORRECT!");
                 // update score of contestant
@@ -277,8 +291,6 @@ int main(int argc, char *argv[])
         // kill contestant process
         if (kill(process_list[current_index-1].id, SIGUSR1) == -1) {
             perror("kill() in main()");
-            close(fd_r);
-            close(fd_w);
             unlink(fifo_name);
             return 1;
         }

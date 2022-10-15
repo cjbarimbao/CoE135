@@ -11,6 +11,7 @@
 #include <signal.h>
 #include <stdbool.h>
 #include <sys/wait.h>
+#include <errno.h>
 
 /*---------
  * Macros
@@ -85,13 +86,52 @@ int check_answer(char *buf, unsigned int answer) {
     return (user_answer == answer);
 }
 
+void read_data(char *buf, char *fifo_name) {
+    int fd_r;
+    // open FIFO file for reading
+    fd_r = open(fifo_name, O_RDONLY);
+
+    if (fd_r == -1) {
+        fprintf(stderr, "Error %d in read_data(): %s\n", errno, strerror(errno));
+        _exit(EXIT_FAILURE);
+    }
+
+    // read data from FIFO file
+    if (read(fd_r, buf, BUF_MAX) == -1) {
+        fprintf(stderr, "Error %d in read_data(): %s\n", errno, strerror(errno));
+        close(fd_r);
+        _exit(EXIT_FAILURE);
+    }
+
+    close(fd_r);
+}
+
+void write_data(char *buf, char *fifo_name) {
+    int fd_w;
+    // open FIFO file for writing
+    fd_w = open(fifo_name, O_WRONLY);
+
+    if (fd_w == -1) {
+        fprintf(stderr, "Error %d in write_data(): %s\n", errno, strerror(errno));
+        _exit(EXIT_FAILURE);
+    }
+
+    // write data to FIFO file
+    if (write(fd_w, buf, strlen(buf) + 1) == -1) {
+        fprintf(stderr, "Error %d in write_data(): %s\n", errno, strerror(errno));
+        close(fd_w);
+        _exit(EXIT_FAILURE);
+    }
+
+    close(fd_w);
+}
+
 /*------------------ 
  * Main function
 ------------------ */
 
 int main(int argc, char*argv[]) 
 {
-    int fd_r, fd_w;
     int i;
     int wstatus = 0;
     int question_count = 1;
@@ -109,19 +149,9 @@ int main(int argc, char*argv[])
         return 1;
     }
 
-    // open FIFO file for reading
-    fd_r = open(fifo_name, O_RDONLY|O_NONBLOCK);
-
-    if (fd_r == -1) {
-        fprintf(stderr, "No such instance of \"Shop Wisely!\" exists, terminating...\n");
-        return 1;
-    }
-
-    // open FIFO file for writing
-    fd_w = open(fifo_name, O_WRONLY|O_NONBLOCK);
-
-    if (fd_w == -1) {
-        perror("open() in main()");
+    // check if file exists
+    if (access(fifo_name, F_OK) == -1) {
+        printf("No such instance of \"Shop Wisely!\" exists, terminating...\n");
         return 1;
     }
 
@@ -132,8 +162,6 @@ int main(int argc, char*argv[])
         // check for fork error
         if (contestant_id == -1) {
             perror("fork() in main()");
-            close(fd_r);
-            close(fd_w);
             return 1;
         } 
         // child process
@@ -151,16 +179,12 @@ int main(int argc, char*argv[])
             // check for SIGINT
             if (sigaction(SIGINT, &sa, NULL) == -1) {
                 perror("sigaction() in main()");
-                close(fd_r);
-                close(fd_w);
                 return 1;
             }
 
             // check for SIGUSR1
             if (sigaction(SIGUSR1, &sigusr_1, NULL) == -1) {
                 perror("sigaction() in main()");
-                close(fd_r);
-                close(fd_w);
                 return 1;
             }
 
@@ -170,36 +194,13 @@ int main(int argc, char*argv[])
             printf("Your ID is %d\n", (int)getpid());
             // send PID to gamemaster
             snprintf(buf, BUF_MAX, "%d", (int)getpid());
-            if (lseek(fd_w, 0, SEEK_SET) == -1) {
-                perror("lseek() in main()");
-                close(fd_r);
-                close(fd_w);
-                return 1;
-            }
-            if (write(fd_w, buf, strlen(buf) + 1) == -1) {
-                perror("write () in main()");
-                close(fd_r);
-                close(fd_w);
-                return 1;
-            } 
+            write_data(buf, fifo_name);
             // contestant loop
             while (true) {
                 // print question number
                 printf("Question %d\n", question_count++);
                 // read from FIFO file
-                // reposition fd_r to beginning of file
-                if (lseek(fd_r, 0, SEEK_SET) == -1) {
-                    perror("lseek() in main()");
-                    close(fd_r);
-                    close(fd_w);
-                    return 1;
-                }
-                if (read(fd_r, buf, BUF_MAX) == -1) {
-                    perror("read() in main()");
-                    close(fd_r);
-                    close(fd_w);
-                    return 1;
-                }
+                read_data(buf, fifo_name);
                 // parse question
                 parse_question(&question, buf);
                 // print question
@@ -208,7 +209,7 @@ int main(int argc, char*argv[])
                     printf("%d\n", question.number[i]);
                 }
                 // ask user input for answer
-                puts("Your answer: ");
+                printf("Your answer: ");
                 fgets(buf, BUF_MAX, stdin);
                 buf[strcspn(buf, "\r\n")] = 0;
                 if (exit_flag == true) {
@@ -227,19 +228,7 @@ int main(int argc, char*argv[])
                         buf[strcspn(buf, "\r\n")] = 0;
                     }
                 }
-                // write answer to FIFO file
-                if (lseek(fd_w, 0, SEEK_SET) == -1) {
-                    perror("lseek() in main()");
-                    close(fd_r);
-                    close(fd_w);
-                    return 1;
-                }
-                if (write(fd_w, buf, strlen(buf) + 1) == -1) {
-                    perror("write () in main()");
-                    close(fd_r);
-                    close(fd_w);
-                    return 1;
-                }
+                write_data(buf, fifo_name);
                 // check answer
                 if (check_answer(buf, question.answer)) {
                     puts("CORRECT!");
@@ -252,14 +241,10 @@ int main(int argc, char*argv[])
                     sigemptyset(&set);
                     if (sigaddset(&set, SIGUSR1) == -1) {
                         perror("sigaddset() in main()");
-                        close(fd_r);
-                        close(fd_w);
                         return 1;
                     }
                     if (sigwait(&set, NULL) == -1) {
                         perror("sigwait() in main()");
-                        close(fd_r);
-                        close(fd_w);
                         return 1;
                     }
                     // print scores
@@ -280,8 +265,6 @@ int main(int argc, char*argv[])
             // check for SIGINT
             if (sigaction(SIGINT, &sa, NULL) == -1) {
                 perror("sigaction() in main()");
-                close(fd_r);
-                close(fd_w);
                 return 1;
             }
             // wait for child process to terminate
