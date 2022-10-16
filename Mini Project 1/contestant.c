@@ -210,16 +210,19 @@ int main(int argc, char*argv[])
                 }
                 // ask user input for answer
                 printf("Your answer: ");
+                //close(open(fifo_name, O_WRONLY)); // temporarily open fifo to unblock open on gamemaster side
                 fgets(buf, BUF_MAX, stdin);
                 buf[strcspn(buf, "\r\n")] = 0;
                 if (exit_flag == true) {
-                    printf("Are you sure you want to quit? (y/n) ");
+                    printf("Are you sure you     want to quit? (y/n) ");
+                    write_data("request", fifo_name);
                     fgets(buf, BUF_MAX, stdin);
                     buf[strcspn(buf, "\r\n")] = 0;
                     if (!strcmp(buf, "y")) {
                         // print scores
                         printf("Your score for this round is %d\n", score);
                         // terminate
+                        write_data("terminate", fifo_name);
                         _exit(3);
                     } else {
                         // continue

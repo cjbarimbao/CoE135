@@ -53,6 +53,24 @@ void handler(int signo) {
     exit_flag = true;
 }
 
+void termination_sequence(void) {
+    FILE *fp;
+    // open scores file for writing
+    fp = fopen("scores.txt", "w");
+    if (fp == NULL) {
+        perror("fopen() in main()");
+        unlink(fifo_name);
+        _exit(EXIT_FAILURE);
+    }
+    // write scores to file
+    fputs(scores, fp);
+    puts("Goodbye! All results are in scores.txt");
+    exit_flag = false;
+    fclose(fp);
+    unlink(fifo_name);
+    _exit(EXIT_SUCCESS);
+}
+
 void store_ID(int id) {
     process_list[current_index].id = id;
     process_list[current_index].score = 0;
@@ -106,14 +124,17 @@ void read_data(char *buf, char *fifo_name) {
     fd_r = open(fifo_name, O_RDONLY);
 
     if (fd_r == -1) {
-        fprintf(stderr, "Error %d in read_data(): %s\n", errno, strerror(errno));
+        if (exit_flag) {
+            termination_sequence();
+        }
+        fprintf(stderr, "Error %d open() in read_data(): %s\n", errno, strerror(errno));
         unlink(fifo_name);
         _exit(EXIT_FAILURE);
     }
 
     // read data from FIFO file
     if (read(fd_r, buf, BUF_MAX) == -1) {
-        fprintf(stderr, "Error %d in read_data(): %s\n", errno, strerror(errno));
+        fprintf(stderr, "Error %d in read() read_data(): %s\n", errno, strerror(errno));
         close(fd_r);
         unlink(fifo_name);
         _exit(EXIT_FAILURE);
@@ -167,7 +188,7 @@ int wait_answer(char *buf, char *fifo_name, question_t *question) {
     // set file descriptor
     FD_ZERO(&readfds);
     FD_SET(fd_r, &readfds);
-
+    puts("Waiting for answer...");
     // wait for data from FIFO file
     status = select(fd_r + 1, &readfds, NULL, NULL, &tv);
 
@@ -204,7 +225,6 @@ int main(int argc, char *argv[])
     struct sigaction sa;
     question_t question;
     pid_t contestant_id;
-    FILE *fp;
     
     fifo_name = argv[1];
     sa.sa_handler = handler;
@@ -222,32 +242,23 @@ int main(int argc, char *argv[])
         perror("mkfifo() in main()");
         return 1;
     }
-    
 
     // seed random number generator
     srand(time(NULL));
     puts("welcome to the \"Shop Wisely!\" Host Program!");
     
+    // check for SIGINT
+    if (sigaction(SIGINT, &sa, NULL) == -1) {
+        perror("sigaction() in main()");
+        return 1;
+    }
+
     while (1) {
         // start of loop when previous contestant is kicked
+        // wait for connection from  contestant
+        puts("Waiting for connection...");
         // get ID of contestant
         read_data(buf, fifo_name);
-        // check for exit flag from signal handler
-        if (exit_flag == true) {
-            // open scores file for writing
-            fp = fopen("scores.txt", "w");
-            if (fp == NULL) {
-                perror("fopen() in main()");
-                unlink(fifo_name);
-                return 1;
-            }
-            // write scores to file
-            fputs(scores, fp);
-            puts("Goodbye! All results are in scores.txt");
-            exit_flag = false;
-            fclose(fp);
-            _exit(EXIT_SUCCESS);
-        }
         // convert to integer
         contestant_id = (int)strtol(buf, NULL, 10);
         // store ID
@@ -273,15 +284,30 @@ int main(int argc, char *argv[])
         // send question to contestant
         write_data(buf, fifo_name);
         // wait for response
+        wait_for_response:
         if (wait_answer(buf, fifo_name, &question)) {
-            if (check_answer(buf, question.answer)) {
-                puts("CORRECT!");
-                // update score of contestant
-                process_list[current_index-1].score++;
-                goto next_question;
+            // check for termination request
+            if (strcmp(buf, "request") == 0) {
+                puts("Contestant issued a termination request");
+                read_data(buf, fifo_name);
+
+                if (strcmp(buf, "terminate") == 0) {
+                    puts("Client left goodbye!");
+                    goto update_score;
+                } else {
+                    goto wait_for_response;
+                } 
+                
             } else {
-                puts("WRONG!");
-            }
+                if (check_answer(buf, question.answer)) {
+                    puts("CORRECT!");
+                    // update score of contestant
+                    process_list[current_index-1].score++;
+                    goto next_question;
+                } else {
+                    puts("WRONG!");
+                }
+            } 
         } else {
             // When no data is read from the pipe
             puts("TIMED OUT!");
@@ -294,11 +320,9 @@ int main(int argc, char *argv[])
             unlink(fifo_name);
             return 1;
         }
-        // save score
+        update_score:
         snprintf(buf, BUF_MAX, "%d -> %d\n", process_list[current_index-1].id, process_list[current_index-1].score);
         strncat(scores, buf, BUF_MAX - strlen(scores) - 1);
-        // wait for connection from next contestant
-        puts("Waiting for connection...");
     }
     return 0;
 }
