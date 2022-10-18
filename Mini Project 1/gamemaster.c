@@ -143,6 +143,7 @@ int read_data(char *buf, char *fifo_name) {
     }
 
     close(fd_r);
+    
     return status;
 }
 
@@ -213,6 +214,7 @@ int wait_answer(char *buf, char *fifo_name, question_t *question) {
                 _exit(EXIT_FAILURE);
             }
         }
+
         close(fd_r);
         return 1;
     }

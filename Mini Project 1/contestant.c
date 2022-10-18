@@ -144,9 +144,11 @@ int termination_sequence(int *fd) {
         // terminate
         write_data("terminate", fifo_name);
         close(*fd);
-        _exit(3);
+        puts("Exiting. Thank you for playing \"Shop Wisely!\"");
+        exit(3);
     } else {
         // continue
+        write_data("continue", fifo_name);
         exit_flag = false;
         return 0;
     }
@@ -189,7 +191,7 @@ void write_answer(char *buf, char *fifo_name) {
         close(fd_w);
         _exit(EXIT_FAILURE);
     }
-
+    
     close(fd_w);
 }
 
