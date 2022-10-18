@@ -118,7 +118,8 @@ int check_answer(char *buf, unsigned int answer) {
     return (user_answer == answer);
 }
 
-void read_data(char *buf, char *fifo_name) {
+int read_data(char *buf, char *fifo_name) {
+    int status;
     int fd_r;
     // open FIFO file for reading
     fd_r = open(fifo_name, O_RDONLY);
@@ -133,7 +134,8 @@ void read_data(char *buf, char *fifo_name) {
     }
 
     // read data from FIFO file
-    if (read(fd_r, buf, BUF_MAX) == -1) {
+    status = read(fd_r, buf, BUF_MAX);
+    if (status == -1) {
         fprintf(stderr, "Error %d in read() read_data(): %s\n", errno, strerror(errno));
         close(fd_r);
         unlink(fifo_name);
@@ -141,6 +143,7 @@ void read_data(char *buf, char *fifo_name) {
     }
 
     close(fd_r);
+    return status;
 }
 
 void write_data(char *buf, char *fifo_name) {
@@ -191,7 +194,7 @@ int wait_answer(char *buf, char *fifo_name, question_t *question) {
     puts("Waiting for answer...");
     // wait for data from FIFO file
     status = select(fd_r + 1, &readfds, NULL, NULL, &tv);
-
+    
     if (status == -1) {
         fprintf(stderr, "Error %d in wait_answer(): %s\n", errno, strerror(errno));
         close(fd_r);
@@ -202,11 +205,13 @@ int wait_answer(char *buf, char *fifo_name, question_t *question) {
         return 0;
     } else {
         // read data from FIFO file
-        if (read(fd_r, buf, BUF_MAX) == -1) {
-            fprintf(stderr, "Error %d in wait_answer(): %s\n", errno, strerror(errno));
-            close(fd_r);
-            unlink(fifo_name);
-            _exit(EXIT_FAILURE);
+        if (FD_ISSET(fd_r, &readfds)) {
+            if (read(fd_r, buf, BUF_MAX) == -1) {
+                fprintf(stderr, "Error %d in wait_answer(): %s\n", errno, strerror(errno));
+                close(fd_r);
+                unlink(fifo_name);
+                _exit(EXIT_FAILURE);
+            }
         }
         close(fd_r);
         return 1;
@@ -239,13 +244,16 @@ int main(int argc, char *argv[])
     
     // create FIFO file for game master to read from
     if (mkfifo(fifo_name, 0666) == -1) {
-        perror("mkfifo() in main()");
+        fprintf(stderr, "Error %d in main(): %s\n", errno, strerror(errno));
+        if (errno == EEXIST) {
+            unlink(fifo_name);
+        }
         return 1;
     }
 
     // seed random number generator
     srand(time(NULL));
-    puts("welcome to the \"Shop Wisely!\" Host Program!");
+    puts("Welcome to the \"Shop Wisely!\" Host Program!");
     
     // check for SIGINT
     if (sigaction(SIGINT, &sa, NULL) == -1) {
@@ -255,10 +263,10 @@ int main(int argc, char *argv[])
 
     while (1) {
         // start of loop when previous contestant is kicked
-        // wait for connection from  contestant
-        puts("Waiting for connection...");
         // get ID of contestant
-        read_data(buf, fifo_name);
+        if (read_data(buf, fifo_name) == 0) {
+            continue;
+        }
         // convert to integer
         contestant_id = (int)strtol(buf, NULL, 10);
         // store ID
@@ -323,6 +331,9 @@ int main(int argc, char *argv[])
         update_score:
         snprintf(buf, BUF_MAX, "%d -> %d\n", process_list[current_index-1].id, process_list[current_index-1].score);
         strncat(scores, buf, BUF_MAX - strlen(scores) - 1);
+
+        // wait for connection from  contestant
+        puts("Waiting for connection...");
     }
     return 0;
 }

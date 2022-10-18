@@ -36,6 +36,8 @@ typedef struct question_s {
 ------------------ */
 
 static volatile bool exit_flag = false;
+static volatile bool timeout_flag = false;
+static volatile bool answered_flag = false;
 char *fifo_name;
 unsigned int score = 0;
 
@@ -50,7 +52,10 @@ void handler(int signo) {
 
 // SIGUSR1 handler
 void terminate_contestant(int signo) {
-    exit(EXIT_SUCCESS);
+    if (answered_flag == false) {
+        timeout_flag = true;
+    }
+
 }
 
 void parse_question(question_t* question, char* buf) {
@@ -114,6 +119,68 @@ void write_data(char *buf, char *fifo_name) {
     if (fd_w == -1) {
         fprintf(stderr, "Error %d in write_data(): %s\n", errno, strerror(errno));
         _exit(EXIT_FAILURE);
+    }
+
+    // write data to FIFO file
+    if (write(fd_w, buf, strlen(buf) + 1) == -1) {
+        fprintf(stderr, "Error %d in write_data(): %s\n", errno, strerror(errno));
+        close(fd_w);
+        _exit(EXIT_FAILURE);
+    }
+    
+    close(fd_w);
+}
+
+int termination_sequence(int *fd) {
+    char buf[BUF_MAX];
+
+    printf("Are you sure you want to quit? (y/n) ");
+    write_data("request", fifo_name);
+    fgets(buf, BUF_MAX, stdin);
+    buf[strcspn(buf, "\r\n")] = 0;
+    if (!strcmp(buf, "y")) {
+        // print scores
+        printf("Your score for this round is %d\n", score);
+        // terminate
+        write_data("terminate", fifo_name);
+        close(*fd);
+        _exit(3);
+    } else {
+        // continue
+        exit_flag = false;
+        return 0;
+    }
+}
+
+void write_answer(char *buf, char *fifo_name) {
+    int fd_w;
+    // open FIFO file for writing
+    fd_w = open(fifo_name, O_WRONLY);
+
+    if (fd_w == -1) {
+        fprintf(stderr, "Error %d in write_data(): %s\n", errno, strerror(errno));
+        _exit(EXIT_FAILURE);
+    }
+
+    fgets(buf, BUF_MAX, stdin);
+    buf[strcspn(buf, "\r\n")] = 0;
+
+    // check for exit flag
+    if (exit_flag == true) {
+        if (termination_sequence(&fd_w) == 0) {
+            fgets(buf, BUF_MAX, stdin);
+            buf[strcspn(buf, "\r\n")] = 0;
+        }
+    }
+    
+    if (timeout_flag == true) {
+        puts("\nTIME'S UP!");
+        puts("Terminating...");
+        timeout_flag = false;
+        close(fd_w);
+        // print scores
+        printf("Your score for this round is %d\n", score);
+        exit(EXIT_SUCCESS);
     }
 
     // write data to FIFO file
@@ -197,6 +264,7 @@ int main(int argc, char*argv[])
             write_data(buf, fifo_name);
             // contestant loop
             while (true) {
+                answered_flag = false;
                 // print question number
                 printf("Question %d\n", question_count++);
                 // read from FIFO file
@@ -210,28 +278,8 @@ int main(int argc, char*argv[])
                 }
                 // ask user input for answer
                 printf("Your answer: ");
-                //close(open(fifo_name, O_WRONLY)); // temporarily open fifo to unblock open on gamemaster side
-                fgets(buf, BUF_MAX, stdin);
-                buf[strcspn(buf, "\r\n")] = 0;
-                if (exit_flag == true) {
-                    printf("Are you sure you     want to quit? (y/n) ");
-                    write_data("request", fifo_name);
-                    fgets(buf, BUF_MAX, stdin);
-                    buf[strcspn(buf, "\r\n")] = 0;
-                    if (!strcmp(buf, "y")) {
-                        // print scores
-                        printf("Your score for this round is %d\n", score);
-                        // terminate
-                        write_data("terminate", fifo_name);
-                        _exit(3);
-                    } else {
-                        // continue
-                        exit_flag = false;
-                        fgets(buf, BUF_MAX, stdin);
-                        buf[strcspn(buf, "\r\n")] = 0;
-                    }
-                }
-                write_data(buf, fifo_name);
+                write_answer(buf, fifo_name);
+                answered_flag = true;
                 // check answer
                 if (check_answer(buf, question.answer)) {
                     puts("CORRECT!");
@@ -259,8 +307,6 @@ int main(int argc, char*argv[])
         }
         // parent process
         else {
-            // print parent ID
-            printf("Parent ID: %d\n", (int)getpid());
             // setup sigaction for parent SIGINT
             sa.sa_handler = SIG_IGN;
             sigemptyset(&sa.sa_mask);
@@ -274,9 +320,8 @@ int main(int argc, char*argv[])
             wait(&wstatus);
             if (WIFEXITED(wstatus)) {
                 if (WEXITSTATUS(wstatus) == 3) {
-                    puts("TERMINATED.");
                     exit(EXIT_SUCCESS);
-                } 
+                }
             }
         }
     }
