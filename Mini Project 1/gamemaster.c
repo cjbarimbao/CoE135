@@ -324,6 +324,8 @@ int main(int argc, char *argv[])
         }
         printf("The answer is %d\n", question.answer);
         printf("Terminating contestant %d\n", process_list[current_index-1].id);
+        // add delay to avoid race conditions
+        sleep(1);
         // kill contestant process
         if (kill(process_list[current_index-1].id, SIGUSR1) == -1) {
             perror("kill() in main()");
